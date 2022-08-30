@@ -13,7 +13,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 Below we Load the Required Libraries:
 
-```{Libraries}
+```{r}
 library(purrr)
 library(tidyverse)
 library(lubridate)
@@ -27,8 +27,8 @@ Initial Data Prep
 
 As the first step of our data preperation process we combine all our google trends data extracts. We will do some initial file cleaning, dropping NA values for rows that did not return a google trends value, coverting the string date value into a date field, adding a baseline month value for rollup purposes and standardizing the indices between schools for the purpose of aggregation and comparison.
 
-```{Initial Data Prep}
-filesnames <- list.files("./data/googletrends", full.names = TRUE)
+```{r}
+filesnames <- list.files("../data/googletrends", full.names = TRUE)
 
 google_data <- map_df(filesnames, read_csv) %>%
 drop_na(index) %>%
@@ -44,11 +44,11 @@ Data Joining
 
 The second step of the data preparation process is reading in our scorecard data and the linking table that will allow us to connect our scorecard data to our Google trends data. We then link the two files using inner joins. As apart of this process we filter out any schools that share the exact same name to simplify our analysis.
 
-```{Data Joining}
-scorecarddata <- read_csv("./data/Most+Recent+Cohorts+(Scorecard+Elements).csv") 
-%>% rename(unitid = UNITID)
+```{r}
+scorecarddata <- read_csv("../data/Most+Recent+Cohorts+(Scorecard+Elements).csv") %>%
+  rename(unitid = UNITID)
 
-id_name_link <- read_csv("./data/id_name_link.csv") %>%
+id_name_link <- read_csv("../data/id_name_link.csv") %>%
 group_by(schname) %>% mutate(n= n()) %>% filter( n == 1)
 
 joineddata <- inner_join(id_name_link, google_data, by = "schname")
@@ -65,7 +65,7 @@ First off I characterize high earning universities as universities in which grad
 
 Within this step I also filtered to only predominately bachelor providing universities, and filtered out any schools which either did not provide average cost of attendance or average student earnings.
 
-```{Final Data Cleanup}
+```{r}
 
 joineddata <- joineddata %>% select(schid, schname, keyword, index,standardindexkeyword, standardindexschool, dateranked, datemonth, PREDDEG,HBCU,RELAFFIL,'md_earn_wne_p10-REPORTED-EARNINGS', 'NPT4_PUB-AVERAGE-ANNUAL-COST',NPT4_PRIV)%>%
   rename(avgstudearnings = 'md_earn_wne_p10-REPORTED-EARNINGS', avgpubcost = 'NPT4_PUB-AVERAGE-ANNUAL-COST')
@@ -78,6 +78,7 @@ joineddata <- joineddata %>%
   mutate(costofattend = as.numeric(costofattend), avgstudearnings = as.numeric(avgstudearnings))%>%
   mutate(highearning = avgstudearnings > (mean(avgstudearnings) + sd(avgstudearnings)), highcost = costofattend > (mean(costofattend) + sd(costofattend)))%>%
   mutate(lowearning = avgstudearnings < (mean(avgstudearnings) - sd(avgstudearnings)), lowcost = costofattend < (mean(costofattend) - sd(costofattend)))%>%
+  mutate(avgearning = avgstudearnings < (mean(avgstudearnings) + sd(avgstudearnings)) & avgstudearnings >   (mean(avgstudearnings) - sd(avgstudearnings)))%>%
   mutate(postScorecards = dateranked >= ymd('2015-09-01')) %>%
   mutate(monthinyear = month(dateranked)) %>%
   mutate(daysfrominitial = dateranked - ymd('2013-03-24')) 
@@ -89,7 +90,7 @@ Initial Aggregates
 
 As the first step of my exploratory analysis I aggregated the data set at the school and month level, the school, month, and cost level,  and the school, month, and earning level. I wanted to do this in order to support high level graphing to help understand the functional form of the dataset.
 
-```{Initial Aggregates}
+```{r}
 schoolmo <- joineddata %>% group_by(schname,datemonth) %>%summarize(monthchange = sum(standardindexschool))
 schoolmocost <- joineddata %>% group_by(schname,datemonth, highcost) %>%summarize(monthchange = sum(standardindexschool))
 schoolmoearnings <- joineddata %>% group_by(schname,datemonth, highearning) %>%summarize(monthchange = sum(standardindexschool))
@@ -101,7 +102,7 @@ The first graph I investigate is a simple scatter plot with X as the aggregated 
 
 I duplicate the top level graph for both high cost schools and high earning schools to see if I can observe any clear patterns. To assist with this I separate out the high cost/earning schools from the non high cost/earning schools to see if either value trends drastically different from the overall combined data set. From a birds eye view there does not seem to be any meaningful difference in slope for high-cost versus non high-cost schools suggesting it will not have very high explanatory power. Interestingly it does look like high earning schools trend downward slightly harder than non high earning schools which would be contrary to expectation. 
 
-```{Initial Exploratory Graphs}
+```{r}
 #Plotting data to observe overall trends
 ggplot(schoolmo, aes(datemonth,monthchange)) + geom_point() + stat_smooth(method = "lm", col = "red")
 
@@ -124,7 +125,7 @@ After controlling for seasonality and time series effects I find that for non hi
 
 As a followup of note I also investigated the impact of low earning schools and medium earning schools to confirm my results and found that as expected low earning schools and medium earning schools both received around a .6-7 standard deviation increase in their search results, when you observed the the interaction between low/medium earning status and the collegescorecard treatment variable.
 
-```{Regression Analysis}
+```{r}
 
 #Initial Top Level Regression of standardindex by school explained by the interaction of scorecard treatment and whether a school is high earning or not. This purposefully leaves out the downward trend and seasonality just to get an inital grasp of the data set
 reg1 <- feols(standardindexschool ~ postScorecards + highearning + postScorecards*highearning,data = joineddata)
@@ -140,14 +141,14 @@ etable(reg3)
 
 #Additionally adding a factor for months to also remove the seasonality from the dataset to better explain the relationship.
 reg4 <- feols(standardindexschool ~ daysfrominitial + postScorecards + highearning + postScorecards*highearning + i(monthinyear), data = joineddata)
-etable(reg5)
+etable(reg4)
 
 #Final regressions to compare the exact opposite effects, observing the effects of low earning schools and low cost schools, as well as the impact of average earning schools.
 reg5 <- feols(standardindexschool ~ daysfrominitial + postScorecards + lowearning + lowcost + postScorecards*lowearning + i(monthinyear), data = joineddata)
-etable(reg6)
+etable(reg5)
 
-reg7 <- feols(standardindexschool ~ daysfrominitial + postScorecards + avgearning + postScorecards*avgearning + i(monthinyear), data = joineddata)
-etable(reg7)
+reg6 <- feols(standardindexschool ~ daysfrominitial + postScorecards + avgearning + postScorecards*avgearning + i(monthinyear), data = joineddata)
+etable(reg6)
 ```
 
 ##Final Conclusions
